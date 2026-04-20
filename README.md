@@ -1,30 +1,57 @@
-# ESP-NOW & LoRa Auto-Switch Communication System
+# ESP-NOW & LoRa Auto-Switch Telemetry System
 
-A wireless communication system for ESP32 that automatically switches between **ESP-NOW** (short-range, high-speed) and **LoRa** (long-range, low-power) based on signal quality and distance — giving the best of both protocols seamlessly.
+A dual-protocol telemetry link for ArduPilot drones that automatically switches between **ESP-NOW** (short-range, high-speed) and **LoRa** (long-range, low-power) using a physical toggle switch — giving you the best of both worlds without recompiling.
 
 ---
 
-## Overview
+## System Architecture
 
-| Feature | ESP-NOW | LoRa |
-|---|---|---|
-| Range | ~200–500 m | ~2–15 km |
-| Speed | Up to 1 Mbps | 0.3–50 kbps |
-| Power | Low | Very Low |
-| Best Use | Close-range, real-time | Long-range, low-data |
+```
+┌─────────────────────────┐          ┌─────────────────────────┐
+│      GROUND UNIT        │          │       AIR UNIT          │
+│  (ground/ground.ino)    │          │    (air/air.ino)        │
+│                         │          │                         │
+│  USB ↔ Mission Planner  │◄────────►│  Serial2 ↔ Flight Ctrl  │
+│                         │  LoRa /  │                         │
+│  Switch → GPIO 25       │ ESP-NOW  │  Switch → GPIO 25       │
+│  LED    → GPIO 4        │          │  LED    → GPIO 4        │
+└─────────────────────────┘          └─────────────────────────┘
+```
 
-The auto-switch logic monitors RSSI and link quality. When the ESP-NOW signal degrades below a threshold, the system seamlessly falls back to LoRa — and switches back when the ESP-NOW link recovers.
+| Protocol | Range | Speed | When to use |
+|---|---|---|---|
+| ESP-NOW | ~200–500 m | ~1 Mbps | Close range, pre-flight, arming |
+| LoRa | ~2–15 km | ~50 kbps | Long range, in-flight telemetry |
+
+**Switch open** → LoRa mode (LED ON)  
+**Switch closed** (pin to GND) → ESP-NOW mode (LED OFF)
+
+---
+
+## Project Structure
+
+```
+esp_now_lora_auto_switch/
+├── ground/
+│   └── ground.ino       # Ground station — connects to PC/Mission Planner via USB Serial
+├── air/
+│   └── air.ino          # Air unit — connects to Flight Controller via Serial2
+├── mac_finder/
+│   └── mac_finder.ino   # Utility: print MAC address to Serial Monitor
+└── README.md
+```
 
 ---
 
 ## Hardware Required
 
-- **2x ESP32** development boards (e.g., ESP32 DevKit v1)
-- **2x LoRa module** — SX1276/SX1278 (e.g., Ra-02, RFM95W)
-- Jumper wires
-- USB cables for programming
+- **2× ESP32** development boards (e.g., ESP32 DevKit v1)
+- **2× LoRa module** — SX1276/SX1278 (Ra-02 or RFM95W)
+- **2× SPDT switch** (or jumper wire)
+- **2× LED** + 220Ω resistor
+- USB cables, jumper wires
 
-### LoRa Wiring (SPI — ESP32)
+### LoRa Wiring (SPI — same for both units)
 
 | LoRa Pin | ESP32 Pin |
 |---|---|
@@ -37,114 +64,91 @@ The auto-switch logic monitors RSSI and link quality. When the ESP-NOW signal de
 | RST | GPIO 14 |
 | DIO0 | GPIO 2 |
 
+### Air Unit Extra Wiring (Flight Controller UART)
+
+| ESP32 | Flight Controller |
+|---|---|
+| GPIO 16 (RX) | FC TX (SERIAL1) |
+| GPIO 17 (TX) | FC RX (SERIAL1) |
+| GND | GND |
+
+> ArduPilot setting: `SERIAL1_BAUD = 57` (57600 baud)
+
 ---
 
 ## Software Dependencies
 
-Install via **Arduino Library Manager** or **PlatformIO**:
+Install via **Arduino Library Manager**:
 
-- [`ESP32 Arduino Core`](https://github.com/espressif/arduino-esp32) — for ESP-NOW support
-- [`LoRa`](https://github.com/sandeepmistry/arduino-LoRa) by Sandeep Mistry
-- `esp_now.h` — built into ESP32 Arduino Core
-
----
-
-## Project Structure
-
-```
-esp_now_lora_auto_switch/
-├── sender/
-│   └── sender.ino          # Transmitter node
-├── receiver/
-│   └── receiver.ino        # Receiver node
-├── lib/
-│   └── auto_switch.h       # Switch logic (RSSI threshold)
-└── README.md
-```
+- `ESP32 Arduino Core` — [espressif/arduino-esp32](https://github.com/espressif/arduino-esp32)
+- `LoRa` by Sandeep Mistry — [sandeepmistry/arduino-LoRa](https://github.com/sandeepmistry/arduino-LoRa)
+- `esp_now.h` / `esp_wifi.h` — built into ESP32 core
 
 ---
 
-## How It Works
+## Quick Start Guide
+
+### Step 1 — Find MAC Addresses
+
+Upload `mac_finder/mac_finder.ino` to **each** ESP32 one at a time.  
+Open Serial Monitor at **115200 baud** and note down both MACs.
 
 ```
-┌─────────────────────────────────────────────┐
-│              Sender Node (ESP32)            │
-│                                             │
-│  1. Try ESP-NOW → check ACK & RSSI          │
-│  2. If RSSI < threshold → switch to LoRa    │
-│  3. Keep checking → switch back if improved │
-└─────────────────────────────────────────────┘
-                     │
-          [ESP-NOW / LoRa packet]
-                     │
-┌─────────────────────────────────────────────┐
-│             Receiver Node (ESP32)           │
-│                                             │
-│  1. Listen on both ESP-NOW & LoRa           │
-│  2. Accept whichever arrives first          │
-│  3. Respond with ACK                        │
-└─────────────────────────────────────────────┘
+================================
+  ESP32 MAC ADDRESS FINDER
+================================
+MY MAC: F0:24:F9:0E:0C:F0
+================================
+Format for code:
+uint8_t mac[] = {0xF0, 0x24, 0xF9, 0x0E, 0x0C, 0xF0};
 ```
 
-### Auto-Switch Logic
+### Step 2 — Set MAC Addresses in Code
 
+**In `ground/ground.ino`** — paste the **AIR unit's MAC**:
 ```cpp
-if (espnow_rssi > RSSI_THRESHOLD) {
-    use_espnow();       // Fast, short-range
-} else {
-    use_lora();         // Reliable, long-range
-}
+uint8_t airMac[] = {0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6};  // ← replace with air MAC
 ```
 
----
-
-## Getting Started
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/salehinontu/Espnow_lora_code.git
-cd Espnow_lora_code
+**In `air/air.ino`** — paste the **GROUND unit's MAC**:
+```cpp
+uint8_t groundMac[] = {0xF0, 0x24, 0xF9, 0x0E, 0x0C, 0xF0};  // ← replace with ground MAC
 ```
 
-### 2. Flash the Sender
+### Step 3 — Flash
 
-Open `sender/sender.ino` in Arduino IDE, select your ESP32 board and COM port, then upload.
+| File | Flash to |
+|---|---|
+| `ground/ground.ino` | Ground ESP32 (connected to PC) |
+| `air/air.ino` | Air ESP32 (connected to Flight Controller) |
 
-### 3. Flash the Receiver
+### Step 4 — Connect Mission Planner
 
-Open `receiver/receiver.ino`, select your ESP32 board, and upload.
-
-### 4. Monitor
-
-Open Serial Monitor at **115200 baud** to see which protocol is active and the incoming data.
+- COM port: whichever the Ground ESP32 is on
+- Baud rate: **57600**
 
 ---
 
 ## Configuration
 
-Edit these defines in the code to tune behavior:
+Edit these defines to tune RF parameters (must match on both units):
 
 ```cpp
-#define RSSI_THRESHOLD     -70    // dBm — below this, switch to LoRa
-#define LORA_FREQUENCY     433E6  // 433 MHz (change to 868E6 or 915E6 as needed)
-#define ESPNOW_CHANNEL     1      // WiFi channel for ESP-NOW
-#define SWITCH_HYSTERESIS  5      // dBm hysteresis to avoid flapping
+#define LORA_FREQ       433E6    // 433 MHz — change to 868E6 or 915E6 as needed
+#define LORA_SF         7        // Spreading factor (7–12, higher = longer range, slower)
+#define LORA_BW         500E3    // Bandwidth
+#define LORA_CR         5        // Coding rate
+#define LORA_TX_PW      17       // TX power in dBm (max 20)
 ```
 
 ---
 
-## Serial Output Example
+## LED Status
 
-```
-[ESP-NOW] RSSI: -55 dBm → Using ESP-NOW
-Data received: "Hello from sender" | Protocol: ESP-NOW
-
-[ESP-NOW] RSSI: -80 dBm → Switching to LoRa
-Data received: "Hello from sender" | Protocol: LoRa
-
-[ESP-NOW] RSSI: -60 dBm → Switching back to ESP-NOW
-```
+| LED | Mode |
+|---|---|
+| ON | LoRa active (long-range) |
+| OFF | ESP-NOW active (short-range) |
 
 ---
 
