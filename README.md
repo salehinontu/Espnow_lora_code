@@ -150,4 +150,14 @@ Edit these defines to tune RF parameters (must match on both units):
 | ON | LoRa active (long-range) |
 | OFF | ESP-NOW active (short-range) |
 
-**Saleh** — [@salehinontu](https://github.com/salehinontu)
+---
+
+## License
+
+MIT License — free to use, modify, and distribute.
+
+---
+
+## Author
+
+**Salehin** — [@salehinontu](https://github.com/salehinontu)
