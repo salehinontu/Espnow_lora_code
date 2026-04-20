@@ -159,5 +159,6 @@ MIT License — free to use, modify, and distribute.
 ---
 
 ## Author
+Salehin
 
 **Saleh** — [@salehinontu](https://github.com/salehinontu)
